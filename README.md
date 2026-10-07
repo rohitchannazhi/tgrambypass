@@ -1,34 +1,37 @@
 # tgrambypass
 
-A small web interface for chatting through a Telegram bot: incoming messages appear live, and you can reply from the browser. No dependencies, Node 18+.
+A hosted web interface for chatting through a Telegram bot, served by GitHub Pages. Incoming messages appear live and you reply from the page.
 
-## Setup
+There is no backend. The page talks to the Telegram Bot API directly from your browser.
+
+## Use it
 
 1. Message [@BotFather](https://t.me/BotFather), run `/newbot`, and copy the token.
-2. Start the server:
-
-   ```sh
-   TELEGRAM_BOT_TOKEN=123456:ABC... npm start
-   ```
-
-3. Open http://127.0.0.1:3000.
-4. Send any message to your bot in Telegram. The chat shows up in the sidebar; select it and reply.
+2. Open the Pages site: https://rohitchannazhi.github.io/tgrambypass/
+3. Paste the token and press Connect.
+4. Send your bot a message in Telegram. The chat appears in the sidebar; select it and reply.
 
 To message someone first, they must have started a conversation with the bot (Telegram's rule). Enter their numeric chat ID in the sidebar.
 
-## Configuration (environment variables)
+## Enabling GitHub Pages
 
-| Variable | Default | Purpose |
-|---|---|---|
-| `TELEGRAM_BOT_TOKEN` | required | Bot token from BotFather |
-| `PORT` | `3000` | HTTP port |
-| `HOST` | `127.0.0.1` | Bind address. Only change this together with `UI_PASSWORD` |
-| `UI_PASSWORD` | none | If set, the UI requires HTTP Basic auth (any username, this password) |
-| `DATA_FILE` | `data/messages.json` | Where message history is stored |
+Repo Settings → Pages → Source: Deploy from a branch → `main` / `(root)`.
 
-## Notes
+## Things to know
 
-- The bot uses long polling (`getUpdates`); any existing webhook for the bot is removed on start.
-- Anyone who can reach the UI can send as your bot. Keep it on localhost, or set `UI_PASSWORD` and put it behind HTTPS.
-- Never commit your token. `.env` and `data/` are git-ignored.
-- Only text is sent; incoming media is shown as a placeholder like `[photo message]`.
+- **Token safety:** the token is saved in your browser's localStorage, never in the repo and never sent anywhere but `api.telegram.org`. Anyone with access to your browser profile can read it, so use "Disconnect" on shared machines. Because the site is static, don't put the token in any file you commit.
+- **Messages only arrive while the page is open.** Telegram holds undelivered messages for about 24 hours, so reopening the page picks up what you missed. History is cached in this browser only, so it isn't shared between devices.
+- **One reader at a time.** Telegram allows only one `getUpdates` poller per bot. If the page shows a conflict warning, close other tabs or the local server.
+- Only text is sent; incoming media shows as a placeholder like `[photo message]`.
+- The page removes any webhook set on the bot when it connects.
+
+## Local server (optional)
+
+`local-server/` is a dependency-free Node 18+ version that keeps history on disk and can run on your own machine or server:
+
+```sh
+cd local-server
+TELEGRAM_BOT_TOKEN=123456:ABC... npm start   # http://127.0.0.1:3000
+```
+
+Set `UI_PASSWORD` if you bind it to anything other than localhost.

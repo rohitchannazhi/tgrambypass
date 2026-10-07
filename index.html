@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Telegram Bot Console</title>
+<style>
+  :root { --bg:#0f1419; --panel:#17202a; --line:#26323f; --text:#e6edf3; --dim:#8b98a5; --in:#202c39; --out:#2b6cb0; --accent:#4aa3ff; }
+  @media (prefers-color-scheme: light) {
+    :root { --bg:#f4f6f8; --panel:#fff; --line:#d9e0e7; --text:#14202b; --dim:#66747f; --in:#eef2f6; --out:#2b6cb0; --accent:#1f6fd1; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; height:100dvh; display:flex; background:var(--bg); color:var(--text); font:15px/1.4 system-ui, sans-serif; }
+  aside { width:280px; background:var(--panel); border-right:1px solid var(--line); display:flex; flex-direction:column; }
+  aside h1 { font-size:15px; margin:0; padding:14px 16px; border-bottom:1px solid var(--line); display:flex; justify-content:space-between; align-items:center; }
+  aside h1 button { background:none; color:var(--dim); padding:0; font-size:12px; }
+  #chats { overflow:auto; flex:1; }
+  .chat { padding:10px 16px; cursor:pointer; border-bottom:1px solid var(--line); }
+  .chat:hover, .chat.active { background:var(--in); }
+  .chat b { display:block; }
+  .chat span { color:var(--dim); font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; display:block; }
+  .chat .n { float:right; background:var(--accent); color:#fff; border-radius:9px; padding:0 6px; font-size:12px; font-style:normal; }
+  #newchat { padding:10px; border-top:1px solid var(--line); display:flex; gap:6px; }
+  main { flex:1; display:flex; flex-direction:column; min-width:0; }
+  header { padding:14px 16px; border-bottom:1px solid var(--line); background:var(--panel); font-weight:600; }
+  #log { flex:1; overflow:auto; padding:16px; display:flex; flex-direction:column; gap:8px; }
+  .msg { max-width:70%; padding:8px 12px; border-radius:12px; background:var(--in); white-space:pre-wrap; overflow-wrap:anywhere; }
+  .msg.out { align-self:flex-end; background:var(--out); color:#fff; }
+  .msg small { display:block; opacity:.65; font-size:11px; margin-top:2px; }
+  form.send { display:flex; gap:8px; padding:12px; border-top:1px solid var(--line); background:var(--panel); }
+  input, textarea { background:var(--bg); color:var(--text); border:1px solid var(--line); border-radius:8px; padding:9px 11px; font:inherit; min-width:0; }
+  form.send textarea { flex:1; resize:none; height:42px; }
+  button { background:var(--accent); color:#fff; border:0; border-radius:8px; padding:9px 16px; font:inherit; cursor:pointer; }
+  button:disabled { opacity:.5; }
+  #err { color:#ff6b6b; padding:0 16px 8px; min-height:1em; font-size:13px; }
+  .empty { margin:auto; color:var(--dim); text-align:center; }
+  #login { position:fixed; inset:0; background:var(--bg); display:flex; align-items:center; justify-content:center; padding:16px; }
+  #login form { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:24px; width:100%; max-width:420px; display:flex; flex-direction:column; gap:12px; }
+  #login h2 { margin:0; }
+  #login p { margin:0; color:var(--dim); font-size:13px; }
+  #login #lerr { color:#ff6b6b; min-height:1em; }
+  [hidden] { display:none !important; }
+  @media (max-width:640px) { aside { width:100px; } .chat span { display:none; } #newchat { display:none; } .msg { max-width:85%; } }
+</style>
+</head>
+<body>
+<div id="login">
+  <form id="loginform">
+    <h2>Telegram Bot Console</h2>
+    <p>Paste the token from @BotFather. It is stored only in this browser and sent only to api.telegram.org.</p>
+    <input id="token" type="password" placeholder="123456:ABC-DEF..." autocomplete="off" required>
+    <button>Connect</button>
+    <div id="lerr"></div>
+  </form>
+</div>
+
+<aside>
+  <h1><span id="botname">Chats</span><button id="logout" type="button">Disconnect</button></h1>
+  <div id="chats"></div>
+  <div id="newchat">
+    <input id="newid" placeholder="Chat ID" style="flex:1">
+    <button id="newbtn" type="button">Open</button>
+  </div>
+</aside>
+<main>
+  <header id="title">Select a chat</header>
+  <div id="log"><div class="empty">Message your bot on Telegram and the chat will appear here.</div></div>
+  <div id="err"></div>
+  <form class="send" id="form">
+    <textarea id="text" placeholder="Type a message (Enter to send, Shift+Enter for newline)" disabled></textarea>
+    <button id="send" disabled>Send</button>
+  </form>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch {} },
+  del(k) { try { localStorage.removeItem(k); } catch {} },
+};
+
+let token = store.get("tg_token");
+let me = null, all = [], offset = 0, current = null, polling = false, abort = null;
+const unread = {}, known = {};
+
+async function tg(method, body, signal) {
+  const r = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body || {}), signal,
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!j.ok) { const e = new Error(j.description || "Telegram API error"); e.code = j.error_code; throw e; }
+  return j.result;
+}
+
+const chatName = (c) => c.title || [c.first_name, c.last_name].filter(Boolean).join(" ") || c.username || String(c.id);
+const time = (t) => new Date(t).toLocaleString([], { hour: "2-digit", minute: "2-digit", month: "short", day: "numeric" });
+const key = () => "tg_data_" + me.id;
+const persist = () => store.set(key(), JSON.stringify({ offset, all: all.slice(-2000) }));
+
+function toMsg(m, dir) {
+  const media = ["photo", "document", "voice", "sticker", "video", "audio", "location"].find((k) => k in m);
+  return {
+    id: `${m.chat.id}:${m.message_id}`, chatId: m.chat.id, chatName: chatName(m.chat),
+    from: dir === "out" ? "Bot" : m.from ? [m.from.first_name, m.from.last_name].filter(Boolean).join(" ") : chatName(m.chat),
+    text: m.text || m.caption || `[${media || "non-text"} message]`, date: m.date * 1000, direction: dir,
+  };
+}
+
+function bubble(m) {
+  const d = document.createElement("div");
+  d.className = "msg " + m.direction;
+  const t = document.createElement("div"); t.textContent = m.text;
+  const s = document.createElement("small"); s.textContent = (m.direction === "in" ? m.from + " · " : "") + time(m.date);
+  d.append(t, s);
+  return d;
+}
+
+function renderChats() {
+  const last = {};
+  for (const m of all) { last[m.chatId] = m; known[m.chatId] = m.chatName; }
+  const ids = Object.keys(known).sort((a, b) => (last[b]?.date || 0) - (last[a]?.date || 0));
+  $("chats").replaceChildren(...ids.map((id) => {
+    const d = document.createElement("div");
+    d.className = "chat" + (String(current) === id ? " active" : "");
+    if (unread[id]) { const n = document.createElement("i"); n.className = "n"; n.textContent = unread[id]; d.append(n); }
+    const b = document.createElement("b"); b.textContent = known[id];
+    const s = document.createElement("span"); s.textContent = last[id]?.text || "";
+    d.append(b, s);
+    d.onclick = () => openChat(id);
+    return d;
+  }));
+}
+
+function renderLog() {
+  const msgs = all.filter((m) => String(m.chatId) === String(current));
+  const log = $("log");
+  log.replaceChildren(...(msgs.length ? msgs.map(bubble) : [Object.assign(document.createElement("div"), { className: "empty", textContent: "No messages yet." })]));
+  log.scrollTop = log.scrollHeight;
+}
+
+function openChat(id) {
+  current = id; unread[id] = 0;
+  $("title").textContent = (known[id] || "Chat") + "  ·  " + id;
+  $("text").disabled = $("send").disabled = false;
+  $("text").focus(); renderChats(); renderLog();
+}
+
+function add(m) {
+  if (all.some((x) => x.id === m.id)) return;
+  all.push(m);
+  if (m.direction === "in" && String(m.chatId) !== String(current)) unread[m.chatId] = (unread[m.chatId] || 0) + 1;
+  renderChats();
+  if (String(m.chatId) === String(current)) renderLog();
+}
+
+async function pollLoop() {
+  if (polling) return;
+  polling = true;
+  while (polling) {
+    abort = new AbortController();
+    try {
+      const updates = await tg("getUpdates", { offset, timeout: 25, allowed_updates: ["message", "channel_post"] }, abort.signal);
+      for (const u of updates) {
+        offset = u.update_id + 1;
+        const m = u.message || u.channel_post;
+        if (m) add(toMsg(m, "in"));
+      }
+      if (updates.length) persist();
+      $("err").textContent = "";
+    } catch (e) {
+      if (!polling) break;
+      if (e.code === 401) { $("err").textContent = "Token rejected."; polling = false; break; }
+      if (e.code === 409) $("err").textContent = "Another client is polling this bot (close it, e.g. the local server or another tab).";
+      else if (e.name !== "AbortError") $("err").textContent = "Connection problem: " + e.message;
+      await new Promise((r) => setTimeout(r, 4000));
+    }
+  }
+}
+
+async function start() {
+  me = await tg("getMe");
+  await tg("deleteWebhook").catch(() => {});
+  try { const d = JSON.parse(store.get(key()) || "{}"); offset = d.offset || 0; all = d.all || []; } catch {}
+  $("botname").textContent = "@" + me.username;
+  $("login").hidden = true;
+  renderChats();
+  pollLoop();
+}
+
+$("loginform").onsubmit = async (e) => {
+  e.preventDefault();
+  token = $("token").value.trim();
+  $("lerr").textContent = "";
+  try { await start(); store.set("tg_token", token); $("token").value = ""; }
+  catch (err) { $("lerr").textContent = "Could not connect: " + err.message; }
+};
+
+$("logout").onclick = () => {
+  polling = false; abort?.abort();
+  store.del("tg_token"); location.reload();
+};
+
+$("newbtn").onclick = () => {
+  const id = $("newid").value.trim();
+  if (!/^-?\d+$/.test(id)) return ($("err").textContent = "Chat ID must be numeric.");
+  $("err").textContent = ""; known[id] ||= "Chat " + id; $("newid").value = ""; openChat(id);
+};
+
+async function send() {
+  const text = $("text").value.trim();
+  if (!text || current == null) return;
+  $("send").disabled = true; $("err").textContent = "";
+  try {
+    const sent = await tg("sendMessage", { chat_id: Number(current), text });
+    add(toMsg(sent, "out")); persist();
+    $("text").value = "";
+  } catch (e) { $("err").textContent = "Send failed: " + e.message; }
+  $("send").disabled = false; $("text").focus();
+}
+$("form").onsubmit = (e) => { e.preventDefault(); send(); };
+$("text").onkeydown = (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } };
+
+if (token) start().catch((err) => { $("lerr").textContent = "Could not connect: " + err.message; });
+</script>
+</body>
+</html>
