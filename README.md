@@ -25,6 +25,19 @@ Repo Settings → Pages → Source: Deploy from a branch → `main` / `(root)`.
 - Only text is sent; incoming media shows as a placeholder like `[photo message]`.
 - The page removes any webhook set on the bot when it connects.
 
+## If your network blocks Telegram ("Failed to fetch")
+
+Some networks block `api.telegram.org`. Deploy the relay in `proxy/worker.js` to a free Cloudflare Worker and give its URL to the page:
+
+1. Sign in at https://dash.cloudflare.com, go to Workers & Pages → Create → Create Worker, and name it (e.g. `tg`).
+2. Edit the code, paste the contents of `proxy/worker.js`, and Deploy.
+3. In the Worker's Settings → Variables, add (recommended):
+   - `ALLOWED_ORIGIN` = `https://rohitchannazhi.github.io`
+   - `ALLOWED_BOT_ID` = the number before the `:` in your bot token
+4. On the page, paste your token and the Worker URL (e.g. `https://tg.yourname.workers.dev`) in the Proxy field, then Connect.
+
+The token passes through your Worker on its way to Telegram, so only deploy it in an account you control. If `workers.dev` is also blocked on your network, attach a custom domain to the Worker or use the local server below on a machine that can reach Telegram.
+
 ## Local server (optional)
 
 `local-server/` is a dependency-free Node 18+ version that keeps history on disk and can run on your own machine or server:

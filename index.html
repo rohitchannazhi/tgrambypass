@@ -49,6 +49,8 @@
     <h2>Telegram Bot Console</h2>
     <p>Paste the token from @BotFather. It is stored only in this browser and sent only to api.telegram.org.</p>
     <input id="token" type="password" placeholder="123456:ABC-DEF..." autocomplete="off" required>
+    <input id="proxy" type="url" placeholder="Proxy URL (optional), e.g. https://tg.you.workers.dev" autocomplete="off">
+    <p>Only fill in the proxy if your network blocks api.telegram.org. See the README.</p>
     <button>Connect</button>
     <div id="lerr"></div>
   </form>
@@ -81,11 +83,12 @@ const store = {
 };
 
 let token = store.get("tg_token");
+let base = store.get("tg_proxy") || "https://api.telegram.org";
 let me = null, all = [], offset = 0, current = null, polling = false, abort = null;
 const unread = {}, known = {};
 
 async function tg(method, body, signal) {
-  const r = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
+  const r = await fetch(`${base}/bot${token}/${method}`, {
     method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body || {}), signal,
   });
   const j = await r.json().catch(() => ({}));
@@ -191,8 +194,14 @@ async function start() {
 $("loginform").onsubmit = async (e) => {
   e.preventDefault();
   token = $("token").value.trim();
+  base = $("proxy").value.trim().replace(/\/+$/, "") || "https://api.telegram.org";
   $("lerr").textContent = "";
-  try { await start(); store.set("tg_token", token); $("token").value = ""; }
+  try {
+    await start();
+    store.set("tg_token", token);
+    base === "https://api.telegram.org" ? store.del("tg_proxy") : store.set("tg_proxy", base);
+    $("token").value = "";
+  }
   catch (err) { $("lerr").textContent = "Could not connect: " + err.message; }
 };
 
